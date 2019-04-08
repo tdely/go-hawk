@@ -1,3 +1,35 @@
+// Package hawk provides easy Hawk authentication.
+//
+// Easiest is to use the provided client:
+//
+//     import hawk "gitlab.com/tdely/go-hawk"
+//
+//     c := &http.Client{}
+//     hc := hawk.NewClient("Hawk ID", []byte("secret"))
+//     body := io.Reader(strings.NewReader("Hello world!"))
+//     req, err := hc.NewRequest("POST", "https://example.com/greeting", body, "text/plain", "")
+//     resp, err := c.Do(req)
+//
+// But if you want to not do payload verification or want to make life harder:
+//
+//     c := &http.Client{}
+//     body := io.Reader(strings.NewReader("Hello world!"))
+//     req, _ := http.NewRequest("POST", "https://example.com/greeting", body)
+//     rd := RequestDetails struct {
+//         Host: "example.com",
+//         Port: "443",
+//         URI: "/greeting",
+//         ContentType: "plain/text",
+//         Data: []byte("Hello world!"),
+//         Method: "POST"}
+//     rd.Timestamp = time.Now().Unix()
+//     rd.Nonce = NewNonce(6)
+//     // rd.SetPayloadHash()
+//     rd.SetMAC("secret")
+//     auth := rd.GetAuthorization("Hawk ID")
+//     req.Header.Add("Content-Type", "plain/text")
+//     req.Header.Add("Authorization", auth)
+//     resp, err := c.Do(req)
 package hawk
 
 import (
@@ -14,6 +46,8 @@ import (
 	"unsafe"
 )
 
+// RequestDetails is the data required for creating Authorization HTTP header
+// for Hawk.
 type RequestDetails struct {
 	Host        string
 	Port        string
@@ -24,14 +58,15 @@ type RequestDetails struct {
 	Timestamp   int64
 	Nonce       string
 	Ext         string
-	Hash        string
-	MAC         string
+	hash        string
+	mac         string
 }
 
-type Hawk struct {
-	client http.Client
-	uid    string
-	key    []byte
+// Client is for creating HTTP requests that are automatically set up
+// for Hawk authentication.
+type Client struct {
+	uid string
+	key []byte
 }
 
 // Regexp pattern for capturing HTTP/HTTPS URLs
@@ -50,7 +85,7 @@ var randSrc = rand.NewSource(time.Now().UnixNano())
 
 // NewNonce creates a new n-length nonce.
 func NewNonce(n int) string {
-	// András Belicza
+	// Author: András Belicza (icza)
 	// https://stackoverflow.com/a/31832326
 	b := make([]byte, n)
 	for i, cache, remain := n-1, randSrc.Int63(), letterIdxMax; i >= 0; {
@@ -69,38 +104,53 @@ func NewNonce(n int) string {
 
 // SetPayloadHash calculates and sets Hawk payload hash for request payload
 // verification. Use before calling SetMAC if payload verification is required.
-func (rd *RequestDetails) SetPayloadHash() {
-	if rd.MAC != "" {
-		return
+func (rd *RequestDetails) SetPayloadHash() bool {
+	if rd.mac != "" {
+		return false
 	}
 	pl := fmt.Sprintf(
 		"hawk.1.payload\n%s\n%x\n",
 		rd.ContentType, rd.Data)
 	plHash := sha.Sum256([]byte(pl))
-	rd.Hash = b64.StdEncoding.EncodeToString(plHash[:])
+	rd.hash = b64.StdEncoding.EncodeToString(plHash[:])
+	return true
+}
+
+// GetPayloadHash returns the current Hawk payload hash.
+func (rd *RequestDetails) GetPayloadHash() string {
+	return rd.hash
 }
 
 // SetMAC calculates and sets Hawk message authentication code (MAC).
 func (rd *RequestDetails) SetMAC(key []byte) {
 	hdr := []byte(fmt.Sprintf(
 		"hawk.1.header\n%d\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n",
-		rd.Timestamp, rd.Nonce, rd.Method, rd.URI, rd.Host, rd.Port, rd.Hash, rd.Ext))
+		rd.Timestamp, rd.Nonce, rd.Method, rd.URI, rd.Host, rd.Port, rd.hash, rd.Ext))
 	mac := hmac.New(sha.New, key)
 	mac.Write(hdr)
 	hashMAC := mac.Sum(nil)
-	rd.MAC = b64.StdEncoding.EncodeToString(hashMAC[:])
+	rd.mac = b64.StdEncoding.EncodeToString(hashMAC[:])
+}
+
+// GetMAC returns the current Hawk message authentication code (MAC).
+func (rd *RequestDetails) GetMAC() string {
+	return rd.mac
 }
 
 // GetAuthorization returns string to use in the Authorization HTTP header.
+// An empty string will be returned if SetMAC has not been used prior.
 func (rd *RequestDetails) GetAuthorization(uid string) string {
+	if rd.mac == "" {
+		return ""
+	}
 	return fmt.Sprintf(
 		`Hawk id="%s", ts="%d", nonce="%s", mac="%s", hash="%s", ext="%s"`,
-		uid, rd.Timestamp, rd.Nonce, rd.MAC, rd.Hash, rd.Ext)
+		uid, rd.Timestamp, rd.Nonce, rd.mac, rd.hash, rd.Ext)
 }
 
 // NewRequest creates a new HTTP request with preset Content-Type header and
 // Authorization header for Hawk.
-func (h *Hawk) NewRequest(method string, url string, body io.Reader, ct string, ext string) (*http.Request, error) {
+func (c *Client) NewRequest(method string, url string, body io.Reader, ct string, ext string) (*http.Request, error) {
 	req, err := http.NewRequest(method, url, body)
 	if err != nil {
 		return req, err
@@ -137,14 +187,14 @@ func (h *Hawk) NewRequest(method string, url string, body io.Reader, ct string, 
 		Nonce:       nonce,
 		Ext:         ext}
 	rd.SetPayloadHash()
-	rd.SetMAC(h.key)
-	auth := rd.GetAuthorization(h.uid)
+	rd.SetMAC(c.key)
+	auth := rd.GetAuthorization(c.uid)
 	req.Header.Add("Content-Type", ct)
 	req.Header.Add("Authorization", auth)
 	return req, nil
 }
 
-// New creates a new Hawk HTTP client.
-func New(uid string, key []byte, client http.Client) Hawk {
-	return Hawk{uid: uid, key: key, client: client}
+// NewClient creates a new Hawk client.
+func NewClient(uid string, key []byte) Client {
+	return Client{uid: uid, key: key}
 }
