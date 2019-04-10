@@ -1,11 +1,17 @@
-// Package hawk provides easy Hawk authentication.
+// Package hawk provides a quick and easy way to send HTTP requests with
+// Hawk authentication.
 //
 // Easiest is to use the provided client:
 //
-//     import hawk "gitlab.com/tdely/go-hawk"
+//     import (
+//         "crypto"
+//         hawk "gitlab.com/tdely/go-hawk"
+//         "http"
+//         "io"
+//     )
 //
 //     c := &http.Client{}
-//     hc := hawk.NewClient("Hawk ID", []byte("secret"))
+//     hc := hawk.NewClient("Hawk ID", []byte("secret"), crypto.SHA256, 6)
 //     body := io.Reader(strings.NewReader("Hello world!"))
 //     req, err := hc.NewRequest("POST", "https://example.com/greeting", body, "text/plain", "")
 //     resp, err := c.Do(req)
@@ -15,7 +21,7 @@
 //     c := &http.Client{}
 //     body := io.Reader(strings.NewReader("Hello world!"))
 //     req, _ := http.NewRequest("POST", "https://example.com/greeting", body)
-//     rd := RequestDetails struct {
+//     rd := RequestDetails{
 //         Host: "example.com",
 //         Port: "443",
 //         URI: "/greeting",
@@ -24,8 +30,8 @@
 //         Method: "POST"}
 //     rd.Timestamp = time.Now().Unix()
 //     rd.Nonce = NewNonce(6)
-//     // rd.SetPayloadHash()
-//     rd.SetMAC("secret")
+//     // rd.SetPayloadHash(crypto.SHA256)
+//     rd.SetMAC(crypto.SHA256, "secret")
 //     auth := rd.GetAuthorization("Hawk ID")
 //     req.Header.Add("Content-Type", "plain/text")
 //     req.Header.Add("Authorization", auth)
@@ -33,8 +39,8 @@
 package hawk
 
 import (
+	"crypto"
 	"crypto/hmac"
-	sha "crypto/sha256"
 	b64 "encoding/base64"
 	"fmt"
 	"io"
@@ -65,8 +71,10 @@ type RequestDetails struct {
 // Client is for creating HTTP requests that are automatically set up
 // for Hawk authentication.
 type Client struct {
-	uid string
-	key []byte
+	uid         string
+	key         []byte
+	hash        crypto.Hash
+	NonceLength int
 }
 
 // Regexp pattern for capturing HTTP/HTTPS URLs
@@ -104,14 +112,16 @@ func NewNonce(n int) string {
 
 // SetPayloadHash calculates and sets Hawk payload hash for request payload
 // verification. Use before calling SetMAC if payload verification is required.
-func (rd *RequestDetails) SetPayloadHash() bool {
+func (rd *RequestDetails) SetPayloadHash(h crypto.Hash) {
 	if rd.mac != "" {
 		return false
 	}
 	pl := fmt.Sprintf(
 		"hawk.1.payload\n%s\n%x\n",
 		rd.ContentType, rd.Data)
-	plHash := sha.Sum256([]byte(pl))
+	hasher := h.New()
+	hasher.Write([]byte(pl))
+	plHash := hasher.Sum(nil)
 	rd.hash = b64.StdEncoding.EncodeToString(plHash[:])
 	return true
 }
@@ -122,11 +132,11 @@ func (rd *RequestDetails) GetPayloadHash() string {
 }
 
 // SetMAC calculates and sets Hawk message authentication code (MAC).
-func (rd *RequestDetails) SetMAC(key []byte) {
+func (rd *RequestDetails) SetMAC(h crypto.Hash, key []byte) {
 	hdr := []byte(fmt.Sprintf(
 		"hawk.1.header\n%d\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n",
 		rd.Timestamp, rd.Nonce, rd.Method, rd.URI, rd.Host, rd.Port, rd.hash, rd.Ext))
-	mac := hmac.New(sha.New, key)
+	mac := hmac.New(h.New, key)
 	mac.Write(hdr)
 	hashMAC := mac.Sum(nil)
 	rd.mac = b64.StdEncoding.EncodeToString(hashMAC[:])
@@ -173,7 +183,7 @@ func (c *Client) NewRequest(method string, url string, body io.Reader, ct string
 	}
 
 	ts := time.Now().Unix()
-	nonce := NewNonce(6)
+	nonce := NewNonce(c.NonceLength)
 	sData, _ := ioutil.ReadAll(body)
 
 	rd := RequestDetails{
@@ -186,8 +196,8 @@ func (c *Client) NewRequest(method string, url string, body io.Reader, ct string
 		Timestamp:   ts,
 		Nonce:       nonce,
 		Ext:         ext}
-	rd.SetPayloadHash()
-	rd.SetMAC(c.key)
+	rd.SetPayloadHash(c.hash)
+	rd.SetMAC(c.hash, c.key)
 	auth := rd.GetAuthorization(c.uid)
 	req.Header.Add("Content-Type", ct)
 	req.Header.Add("Authorization", auth)
@@ -195,6 +205,6 @@ func (c *Client) NewRequest(method string, url string, body io.Reader, ct string
 }
 
 // NewClient creates a new Hawk client.
-func NewClient(uid string, key []byte) Client {
-	return Client{uid: uid, key: key}
+func NewClient(uid string, key []byte, alg crypto.Hash, nonceLength int) Client {
+	return Client{uid: uid, key: key, hash: alg, NonceLength: nonceLength}
 }
