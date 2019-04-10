@@ -79,7 +79,7 @@ type Client struct {
 
 // Regexp pattern for capturing HTTP/HTTPS URLs
 // Subgroups: 1 scheme, 2 host, 4 port, 5 URI
-const urlPattern = "^(http|https)://([^:/]+)(:([0-9]+))?(/(.+)?)?"
+const urlPattern = "^(http|https)://([^:/]+)(:([0-9]+))?(/(.+)?)?$"
 
 // Constants for nonce creation
 const (
@@ -112,12 +112,12 @@ func NewNonce(n int) string {
 
 // SetPayloadHash calculates and sets Hawk payload hash for request payload
 // verification. Use before calling SetMAC if payload verification is required.
-func (rd *RequestDetails) SetPayloadHash(h crypto.Hash) {
-	if rd.mac != "" {
+func (rd *RequestDetails) SetPayloadHash(h crypto.Hash) bool {
+	if rd.mac != "" || rd.ContentType == "" {
 		return false
 	}
 	pl := fmt.Sprintf(
-		"hawk.1.payload\n%s\n%x\n",
+		"hawk.1.payload\n%s\n%s\n",
 		rd.ContentType, rd.Data)
 	hasher := h.New()
 	hasher.Write([]byte(pl))
@@ -132,7 +132,10 @@ func (rd *RequestDetails) GetPayloadHash() string {
 }
 
 // SetMAC calculates and sets Hawk message authentication code (MAC).
-func (rd *RequestDetails) SetMAC(h crypto.Hash, key []byte) {
+func (rd *RequestDetails) SetMAC(h crypto.Hash, key []byte) bool {
+	if rd.Timestamp == 0 || rd.Nonce == "" || rd.Method == "" || rd.URI == "" || rd.Host == "" || rd.Port == "" {
+		return false
+	}
 	hdr := []byte(fmt.Sprintf(
 		"hawk.1.header\n%d\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n",
 		rd.Timestamp, rd.Nonce, rd.Method, rd.URI, rd.Host, rd.Port, rd.hash, rd.Ext))
@@ -140,6 +143,7 @@ func (rd *RequestDetails) SetMAC(h crypto.Hash, key []byte) {
 	mac.Write(hdr)
 	hashMAC := mac.Sum(nil)
 	rd.mac = b64.StdEncoding.EncodeToString(hashMAC[:])
+	return true
 }
 
 // GetMAC returns the current Hawk message authentication code (MAC).
@@ -153,9 +157,17 @@ func (rd *RequestDetails) GetAuthorization(uid string) string {
 	if rd.mac == "" {
 		return ""
 	}
-	return fmt.Sprintf(
-		`Hawk id="%s", ts="%d", nonce="%s", mac="%s", hash="%s", ext="%s"`,
-		uid, rd.Timestamp, rd.Nonce, rd.mac, rd.hash, rd.Ext)
+	var hc string
+	if rd.hash == "" {
+		hc = fmt.Sprintf(
+			`Hawk id="%s", ts="%d", nonce="%s", ext="%s", mac="%s"`,
+			uid, rd.Timestamp, rd.Nonce, rd.Ext, rd.mac)
+	} else {
+		hc = fmt.Sprintf(
+			`Hawk id="%s", ts="%d", nonce="%s", hash="%s", ext="%s", mac="%s"`,
+			uid, rd.Timestamp, rd.Nonce, rd.hash, rd.Ext, rd.mac)
+	}
+	return hc
 }
 
 // NewRequest creates a new HTTP request with preset Content-Type header and
@@ -178,20 +190,21 @@ func (c *Client) NewRequest(method string, url string, body io.Reader, ct string
 		port = "443"
 	} else if string(pURL[1]) == "http" {
 		port = "80"
-	} else {
-		return nil, fmt.Errorf("Unsupported scheme: %s", string(pURL[1]))
 	}
 
 	ts := time.Now().Unix()
 	nonce := NewNonce(c.NonceLength)
-	sData, _ := ioutil.ReadAll(body)
+	var bData []byte
+	if body != nil {
+		bData, _ = ioutil.ReadAll(body)
+	}
 
 	rd := RequestDetails{
 		Host:        string(pURL[2]),
 		Port:        port,
 		URI:         string(pURL[5]),
 		ContentType: ct,
-		Data:        sData,
+		Data:        bData,
 		Method:      method,
 		Timestamp:   ts,
 		Nonce:       nonce,
