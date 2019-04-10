@@ -6,8 +6,10 @@
 //     import (
 //         "crypto"
 //         hawk "gitlab.com/tdely/go-hawk"
-//         "http"
+//         "net/http"
 //         "io"
+//         "strings"
+//         "time"
 //     )
 //
 //     c := &http.Client{}
@@ -21,18 +23,20 @@
 //     c := &http.Client{}
 //     body := io.Reader(strings.NewReader("Hello world!"))
 //     req, _ := http.NewRequest("POST", "https://example.com/greeting", body)
-//     rd := RequestDetails{
-//         Host: "example.com",
-//         Port: "443",
-//         URI: "/greeting",
+//     hd := HawkDetails{
+//         Algorithm:   crypto.SHA256
+//         Host:        "example.com",
+//         Port:        "443",
+//         URI:         "/greeting",
 //         ContentType: "plain/text",
-//         Data: []byte("Hello world!"),
-//         Method: "POST"}
-//     rd.Timestamp = time.Now().Unix()
-//     rd.Nonce = NewNonce(6)
-//     // rd.SetPayloadHash(crypto.SHA256)
-//     rd.SetMAC(crypto.SHA256, "secret")
-//     auth := rd.GetAuthorization("Hawk ID")
+//         Content:     []byte("Hello world!"),
+//         Method:      "POST"}
+//     hd.Timestamp = time.Now().Unix()
+//     hd.Nonce = NewNonce(6)
+//     h, _ hd.Create()
+//     // h.Validate()
+//     h.Finalize("secret")
+//     auth := h.GetAuthorization("Hawk ID")
 //     req.Header.Add("Content-Type", "plain/text")
 //     req.Header.Add("Authorization", auth)
 //     resp, err := c.Do(req)
@@ -52,20 +56,77 @@ import (
 	"unsafe"
 )
 
-// RequestDetails is the data required for creating Authorization HTTP header
-// for Hawk.
-type RequestDetails struct {
+type Hawk struct {
+	algorithm crypto.Hash
+
+	host      string
+	port      string
+	uri       string
+	method    string
+	timestamp int64
+	nonce     string
+
+	reqContentType string
+	reqContent     []byte
+	reqExt         string
+	reqHash        string
+	reqMAC         string
+
+	respContentType string
+	respContent     []byte
+	respExt         string
+	respHash        string
+	respMac         string
+}
+
+// Create takes the data in HawkDetails and creates a Hawk instance.
+// Nonce and/or Timestamp may be omitted from HawkDetails to automatically
+// create these values. Error on missing Host, Port, URI, Method, or Algorithm.
+func (hd *HawkDetails) Create() (Hawk, error) {
+	if !hd.Algorithm.Available() {
+		fmt.Errorf("No algorithm provided")
+	} else if hd.Host == "" {
+		fmt.Errorf("No host provided")
+	} else if hd.Port == "" {
+		fmt.Errorf("No port provided")
+	} else if hd.URI == "" {
+		fmt.Errorf("No URI provided")
+	} else if hd.Method == "" {
+		fmt.Errorf("No method provided")
+	}
+	h := Hawk{
+		algorithm:      hd.Algorithm,
+		host:           hd.Host,
+		port:           hd.Port,
+		uri:            hd.URI,
+		method:         hd.Method,
+		timestamp:      hd.Timestamp,
+		nonce:          hd.Nonce,
+		reqContentType: hd.ContentType,
+		reqContent:     hd.Content,
+		reqExt:         hd.Ext}
+	if h.nonce == "" {
+		h.nonce = NewNonce(6)
+	}
+	if h.timestamp == 0 {
+		h.timestamp = time.Now().Unix()
+	}
+	return h, nil
+}
+
+// HawkDetails is the data required for creating Authorization HTTP header for
+// Hawk.
+type HawkDetails struct {
+	Algorithm   crypto.Hash
 	Host        string
 	Port        string
 	URI         string
 	ContentType string
-	Data        []byte
+	Content     []byte
 	Method      string
 	Timestamp   int64
 	Nonce       string
 	Ext         string
-	hash        string
-	mac         string
 }
 
 // Client is for creating HTTP requests that are automatically set up
@@ -110,69 +171,75 @@ func NewNonce(n int) string {
 	return *(*string)(unsafe.Pointer(&b))
 }
 
-// SetPayloadHash calculates and sets Hawk payload hash for request payload
-// verification. Use before calling SetMAC if payload verification is required.
-func (rd *RequestDetails) SetPayloadHash(h crypto.Hash) bool {
-	if rd.mac != "" || rd.ContentType == "" {
-		return false
-	}
+func hashPayload(h crypto.Hash, ct string, c []byte) string {
 	pl := fmt.Sprintf(
 		"hawk.1.payload\n%s\n%s\n",
-		rd.ContentType, rd.Data)
+		ct, c)
 	hasher := h.New()
 	hasher.Write([]byte(pl))
 	plHash := hasher.Sum(nil)
-	rd.hash = b64.StdEncoding.EncodeToString(plHash[:])
-	return true
+	return b64.StdEncoding.EncodeToString(plHash[:])
 }
 
-// GetPayloadHash returns the current Hawk payload hash.
-func (rd *RequestDetails) GetPayloadHash() string {
-	return rd.hash
-}
-
-// SetMAC calculates and sets Hawk message authentication code (MAC).
-func (rd *RequestDetails) SetMAC(h crypto.Hash, key []byte) bool {
-	if rd.Timestamp == 0 || rd.Nonce == "" || rd.Method == "" || rd.URI == "" || rd.Host == "" || rd.Port == "" {
+// Validate calculates and sets hash for Hawk request payload validation.
+// Use before calling Finalize if payload validation is required.
+func (h *Hawk) Validate() bool {
+	if h.reqMAC != "" || h.reqContentType == "" {
 		return false
 	}
-	hdr := []byte(fmt.Sprintf(
-		"hawk.1.header\n%d\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n",
-		rd.Timestamp, rd.Nonce, rd.Method, rd.URI, rd.Host, rd.Port, rd.hash, rd.Ext))
-	mac := hmac.New(h.New, key)
-	mac.Write(hdr)
-	hashMAC := mac.Sum(nil)
-	rd.mac = b64.StdEncoding.EncodeToString(hashMAC[:])
+	h.reqHash = hashPayload(h.algorithm, h.reqContentType, h.reqContent)
 	return true
 }
 
-// GetMAC returns the current Hawk message authentication code (MAC).
-func (rd *RequestDetails) GetMAC() string {
-	return rd.mac
+func hashMAC(h crypto.Hash, k []byte, ts int64, n string, mtd string, uri string, hst string, p string, hsh string, ext string) string {
+	hdr := []byte(fmt.Sprintf(
+		"hawk.1.header\n%d\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n",
+		ts, n, mtd, uri, hst, p, hsh, ext))
+	m := hmac.New(h.New, k)
+	m.Write(hdr)
+	mac := m.Sum(nil)
+	return b64.StdEncoding.EncodeToString(mac[:])
+}
+
+// Finalize calculates and sets Hawk message authentication code (MAC).
+func (h *Hawk) Finalize(key []byte) bool {
+	if h.timestamp == 0 || h.nonce == "" || h.method == "" || h.uri == "" || h.host == "" || h.port == "" || h.reqMAC != "" {
+		return false
+	}
+	h.reqMAC = hashMAC(h.algorithm, key, h.timestamp, h.nonce, h.method, h.uri, h.host, h.port, h.reqHash, h.reqExt)
+	return true
+}
+
+// GetReqMAC returns the Hawk request MAC.
+func (h *Hawk) GetReqMAC() string {
+	return h.reqMAC
+}
+
+// GetReqHash returns the Hawk request payload hash.
+func (h *Hawk) GetReqHash() string {
+	return h.reqHash
 }
 
 // GetAuthorization returns string to use in the Authorization HTTP header.
-// An empty string will be returned if SetMAC has not been used prior.
-func (rd *RequestDetails) GetAuthorization(uid string) string {
-	if rd.mac == "" {
+// An empty string will be returned if Finalize has not been used prior.
+func (h *Hawk) GetAuthorization(uid string) string {
+	if h.reqMAC == "" {
 		return ""
 	}
-	var hc string
-	if rd.hash == "" {
-		hc = fmt.Sprintf(
-			`Hawk id="%s", ts="%d", nonce="%s", ext="%s", mac="%s"`,
-			uid, rd.Timestamp, rd.Nonce, rd.Ext, rd.mac)
-	} else {
-		hc = fmt.Sprintf(
-			`Hawk id="%s", ts="%d", nonce="%s", hash="%s", ext="%s", mac="%s"`,
-			uid, rd.Timestamp, rd.Nonce, rd.hash, rd.Ext, rd.mac)
+	hc := fmt.Sprintf(`Hawk id="%s", ts="%d", nonce="%s"`, uid, h.timestamp, h.nonce)
+	if h.reqHash != "" {
+		hc = fmt.Sprintf(`%s, hash="%s"`, hc, h.reqHash)
 	}
+	if h.reqExt != "" {
+		hc = fmt.Sprintf(`%s, ext="%s"`, hc, h.reqExt)
+	}
+	hc = fmt.Sprintf(`%s, mac="%s"`, hc, h.reqMAC)
 	return hc
 }
 
 // NewRequest creates a new HTTP request with preset Content-Type header and
 // Authorization header for Hawk.
-func (c *Client) NewRequest(method string, url string, body io.Reader, ct string, ext string) (*http.Request, error) {
+func (c *Client) NewRequest(method string, url string, body io.Reader, contentType string, ext string) (*http.Request, error) {
 	req, err := http.NewRequest(method, url, body)
 	if err != nil {
 		return req, err
@@ -194,30 +261,35 @@ func (c *Client) NewRequest(method string, url string, body io.Reader, ct string
 
 	ts := time.Now().Unix()
 	nonce := NewNonce(c.NonceLength)
-	var bData []byte
+	var content []byte
 	if body != nil {
-		bData, _ = ioutil.ReadAll(body)
+		content, _ = ioutil.ReadAll(body)
 	}
 
-	rd := RequestDetails{
+	hd := HawkDetails{
+		Algorithm:   c.hash,
 		Host:        string(pURL[2]),
 		Port:        port,
 		URI:         string(pURL[5]),
-		ContentType: ct,
-		Data:        bData,
+		ContentType: contentType,
+		Content:     content,
 		Method:      method,
 		Timestamp:   ts,
 		Nonce:       nonce,
 		Ext:         ext}
-	rd.SetPayloadHash(c.hash)
-	rd.SetMAC(c.hash, c.key)
-	auth := rd.GetAuthorization(c.uid)
-	req.Header.Add("Content-Type", ct)
+	h, _ := hd.Create()
+	h.Validate()
+	h.Finalize(c.key)
+	auth := h.GetAuthorization(c.uid)
+	req.Header.Add("Content-Type", contentType)
 	req.Header.Add("Authorization", auth)
 	return req, nil
 }
 
 // NewClient creates a new Hawk client.
-func NewClient(uid string, key []byte, alg crypto.Hash, nonceLength int) Client {
-	return Client{uid: uid, key: key, hash: alg, NonceLength: nonceLength}
+func NewClient(uid string, key []byte, algorithm crypto.Hash, nonceLength int) Client {
+	if !algorithm.Available() {
+		fmt.Errorf("No algorithm provided or algorithm unavailable")
+	}
+	return Client{uid: uid, key: key, hash: algorithm, NonceLength: nonceLength}
 }
