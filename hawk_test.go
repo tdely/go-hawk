@@ -44,7 +44,7 @@ func TestNonce(t *testing.T) {
 
 func TestHawkSpecifics(t *testing.T) {
 	t.Run("standard", func(t *testing.T) {
-		hd := HawkDetails{
+		hd := Details{
 			Algorithm: crypto.SHA256,
 			Host:      "example.com",
 			Port:      "8000",
@@ -63,7 +63,7 @@ func TestHawkSpecifics(t *testing.T) {
 		}
 	})
 	t.Run("standard-payload", func(t *testing.T) {
-		hd := HawkDetails{
+		hd := Details{
 			Algorithm:   crypto.SHA256,
 			Host:        "example.com",
 			Port:        "8000",
@@ -90,8 +90,8 @@ func TestHawkSpecifics(t *testing.T) {
 }
 
 func TestCreate(t *testing.T) {
-	t.Run("Create-missing-HawkDetails-alg", func(t *testing.T) {
-		hd := HawkDetails{
+	t.Run("Create-missing-Details-alg", func(t *testing.T) {
+		hd := Details{
 			Host:   "example.com",
 			Port:   "8000",
 			URI:    "/resource/1?b=1&a=2",
@@ -99,11 +99,11 @@ func TestCreate(t *testing.T) {
 		}
 		_, err := hd.Create()
 		if err != nil {
-			t.Errorf("Create failed: no error on HawkDetails empty algorithm")
+			t.Errorf("Create failed: no error on Details empty algorithm")
 		}
 	})
-	t.Run("Create-missing-HawkDetails-host", func(t *testing.T) {
-		hd := HawkDetails{
+	t.Run("Create-missing-Details-host", func(t *testing.T) {
+		hd := Details{
 			Algorithm: crypto.SHA256,
 			Port:      "8000",
 			URI:       "/resource/1?b=1&a=2",
@@ -111,11 +111,11 @@ func TestCreate(t *testing.T) {
 		}
 		_, err := hd.Create()
 		if err != nil {
-			t.Errorf("Create failed: no error on HawkDetails empty host")
+			t.Errorf("Create failed: no error on Details empty host")
 		}
 	})
-	t.Run("Create-missing-HawkDetails-port", func(t *testing.T) {
-		hd := HawkDetails{
+	t.Run("Create-missing-Details-port", func(t *testing.T) {
+		hd := Details{
 			Algorithm: crypto.SHA256,
 			Host:      "example.com",
 			URI:       "/resource/1?b=1&a=2",
@@ -123,11 +123,11 @@ func TestCreate(t *testing.T) {
 		}
 		_, err := hd.Create()
 		if err != nil {
-			t.Errorf("Create failed: no error on HawkDetails empty port")
+			t.Errorf("Create failed: no error on Details empty port")
 		}
 	})
-	t.Run("Create-missing-HawkDetails-uri", func(t *testing.T) {
-		hd := HawkDetails{
+	t.Run("Create-missing-Details-uri", func(t *testing.T) {
+		hd := Details{
 			Algorithm: crypto.SHA256,
 			Host:      "example.com",
 			Port:      "8000",
@@ -135,11 +135,11 @@ func TestCreate(t *testing.T) {
 		}
 		_, err := hd.Create()
 		if err != nil {
-			t.Errorf("Create failed: no error on HawkDetails empty uri")
+			t.Errorf("Create failed: no error on Details empty uri")
 		}
 	})
-	t.Run("Create-missing-HawkDetails-method", func(t *testing.T) {
-		hd := HawkDetails{
+	t.Run("Create-missing-Details-method", func(t *testing.T) {
+		hd := Details{
 			Algorithm: crypto.SHA256,
 			Host:      "example.com",
 			Port:      "8000",
@@ -147,14 +147,14 @@ func TestCreate(t *testing.T) {
 		}
 		_, err := hd.Create()
 		if err != nil {
-			t.Errorf("Create failed: no error on HawkDetails empty method")
+			t.Errorf("Create failed: no error on Details empty method")
 		}
 	})
 }
 
 func TestEmpty(t *testing.T) {
 	t.Run("Validate-missing", func(t *testing.T) {
-		hd := HawkDetails{
+		hd := Details{
 			Algorithm: crypto.SHA256,
 			Host:      "localhost",
 			Port:      "8000",

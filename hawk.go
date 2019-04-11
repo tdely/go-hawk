@@ -23,7 +23,7 @@
 //     c := &http.Client{}
 //     body := io.Reader(strings.NewReader("Hello world!"))
 //     req, _ := http.NewRequest("POST", "https://example.com/greeting", body)
-//     hd := HawkDetails{
+//     hd := hawk.Details{
 //         Algorithm:   crypto.SHA256
 //         Host:        "example.com",
 //         Port:        "443",
@@ -32,7 +32,7 @@
 //         Content:     []byte("Hello world!"),
 //         Method:      "POST"}
 //     hd.Timestamp = time.Now().Unix()
-//     hd.Nonce = NewNonce(6)
+//     hd.Nonce = hawk.NewNonce(6)
 //     h, _ hd.Create()
 //     // h.Validate()
 //     h.Finalize("secret")
@@ -56,6 +56,8 @@ import (
 	"unsafe"
 )
 
+// Hawk is created from Details.Create() and used for creating the Hawk
+// Authorization header.
 type Hawk struct {
 	algorithm crypto.Hash
 
@@ -79,20 +81,24 @@ type Hawk struct {
 	respMac         string
 }
 
-// Create takes the data in HawkDetails and creates a Hawk instance.
-// Nonce and/or Timestamp may be omitted from HawkDetails to automatically
+// Create takes the data in Details and creates a Hawk instance.
+// Nonce and/or Timestamp may be omitted from Details to automatically
 // create these values. Error on missing Host, Port, URI, Method, or Algorithm.
-func (hd *HawkDetails) Create() (Hawk, error) {
+func (hd *Details) Create() (Hawk, error) {
+	var err error
 	if !hd.Algorithm.Available() {
-		fmt.Errorf("No algorithm provided")
+		err = fmt.Errorf("No algorithm provided")
 	} else if hd.Host == "" {
-		fmt.Errorf("No host provided")
+		err = fmt.Errorf("No host provided")
 	} else if hd.Port == "" {
-		fmt.Errorf("No port provided")
+		err = fmt.Errorf("No port provided")
 	} else if hd.URI == "" {
-		fmt.Errorf("No URI provided")
+		err = fmt.Errorf("No URI provided")
 	} else if hd.Method == "" {
-		fmt.Errorf("No method provided")
+		err = fmt.Errorf("No method provided")
+	}
+	if err != nil {
+		return Hawk{}, nil
 	}
 	h := Hawk{
 		algorithm:      hd.Algorithm,
@@ -114,9 +120,9 @@ func (hd *HawkDetails) Create() (Hawk, error) {
 	return h, nil
 }
 
-// HawkDetails is the data required for creating Authorization HTTP header for
+// Details is the data required for creating Authorization HTTP header for
 // Hawk.
-type HawkDetails struct {
+type Details struct {
 	Algorithm   crypto.Hash
 	Host        string
 	Port        string
@@ -266,7 +272,7 @@ func (c *Client) NewRequest(method string, url string, body io.Reader, contentTy
 		content, _ = ioutil.ReadAll(body)
 	}
 
-	hd := HawkDetails{
+	hd := Details{
 		Algorithm:   c.hash,
 		Host:        string(pURL[2]),
 		Port:        port,
@@ -288,8 +294,5 @@ func (c *Client) NewRequest(method string, url string, body io.Reader, contentTy
 
 // NewClient creates a new Hawk client.
 func NewClient(uid string, key []byte, algorithm crypto.Hash, nonceLength int) Client {
-	if !algorithm.Available() {
-		fmt.Errorf("No algorithm provided or algorithm unavailable")
-	}
 	return Client{uid: uid, key: key, hash: algorithm, NonceLength: nonceLength}
 }
