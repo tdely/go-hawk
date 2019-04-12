@@ -267,8 +267,10 @@ func (c *Client) NewRequest(method string, url string, body io.Reader, contentTy
 
 	ts := time.Now().Unix()
 	nonce := NewNonce(c.NonceLength)
+
 	var content []byte
-	if body != nil {
+	if req.Body != nil {
+		body, _ = req.GetBody()
 		content, _ = ioutil.ReadAll(body)
 	}
 

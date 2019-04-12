@@ -3,7 +3,11 @@ package hawk
 import (
 	"bytes"
 	"crypto"
+	"fmt"
 	"io"
+	"io/ioutil"
+	"net/http"
+	"net/http/httptest"
 	"regexp"
 	"strings"
 	"testing"
@@ -237,6 +241,44 @@ func TestClient(t *testing.T) {
 		}
 		if req.Header.Get("Authorization") == "" {
 			t.Errorf("NewRequest failed: header Authorization empty")
+		}
+	})
+	t.Run("send-no-data", func(t *testing.T) {
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/plain")
+			b, _ := ioutil.ReadAll(r.Body)
+			if len(b) > 0 {
+				t.Errorf("NewRequest failed: body not nil: %s", b)
+			}
+			fmt.Fprintln(w, "OK.")
+		}))
+		defer ts.Close()
+		c := &http.Client{}
+		hc := NewClient("jdoe", []byte("Syp9393"), crypto.SHA256, 6)
+		req, err := hc.NewRequest("POST", ts.URL+"/hello", nil, "text/plain", "")
+		_, err = c.Do(req)
+		if err != nil {
+			t.Errorf("NewRequest failed: %s", err.Error())
+		}
+	})
+	t.Run("send-data", func(t *testing.T) {
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/plain")
+			b, _ := ioutil.ReadAll(r.Body)
+			if string(b) != "Hello world!" {
+				t.Errorf("NewRequest failed: body not nil: %s", b)
+			}
+			fmt.Fprintln(w, "OK.")
+		}))
+		defer ts.Close()
+		data := "Hello world!"
+		body := strings.NewReader(data)
+		c := &http.Client{}
+		hc := NewClient("jdoe", []byte("Syp9393"), crypto.SHA256, 6)
+		req, err := hc.NewRequest("POST", ts.URL+"/hello", body, "text/plain", "")
+		_, err = c.Do(req)
+		if err != nil {
+			t.Errorf("NewRequest failed: %s", err.Error())
 		}
 	})
 }
