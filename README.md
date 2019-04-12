@@ -31,7 +31,7 @@ import (
 
 c := &http.Client{}
 hc := hawk.NewClient("Hawk ID", []byte("secret"), crypto.SHA256, 6)
-body := io.Reader(strings.NewReader("Hello world!"))
+body := strings.NewReader("Hello world!")
 req, err := hc.NewRequest("POST", "https://example.com/greeting", body, "text/plain", "")
 resp, err := c.Do(req)
 ```
@@ -40,9 +40,9 @@ But if you want to not do payload verification or want to make life harder:
 
 ```go
 c := &http.Client{}
-body := io.Reader(strings.NewReader("Hello world!"))
+body := strings.NewReader("Hello world!")
 req, _ := http.NewRequest("POST", "https://example.com/greeting", body)
-hd := HawkDetails{
+hd := hawk.Details{
     Algorithm:   crypto.SHA256
     Host:        "example.com",
     Port:        "443",
@@ -51,7 +51,7 @@ hd := HawkDetails{
     Content:     []byte("Hello world!"),
     Method:      "POST"}
 hd.Timestamp = time.Now().Unix()
-hd.Nonce = NewNonce(6)
+hd.Nonce = hawk.NewNonce(6)
 h, _ hd.Create()
 // h.Validate()
 h.Finalize("secret")

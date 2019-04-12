@@ -13,15 +13,15 @@
 //     )
 //
 //     c := &http.Client{}
-//     hc := hawk.NewClient("Hawk ID", []byte("secret"), crypto.SHA256, 6)
-//     body := io.Reader(strings.NewReader("Hello world!"))
-//     req, err := hc.NewRequest("POST", "https://example.com/greeting", body, "text/plain", "")
+//     hc := hawk.NewClient("your-hawk-id", []byte("secret"), crypto.SHA256, 6)
+//     body := strings.NewReader("Hello world!")
+//     req, err := hc.NewRequest("POST", "https://example.com/greeting", body, "text/plain", "some-app-ext-data")
 //     resp, err := c.Do(req)
 //
 // But if you want to not do payload verification or want to make life harder:
 //
 //     c := &http.Client{}
-//     body := io.Reader(strings.NewReader("Hello world!"))
+//     body := strings.NewReader("Hello world!")
 //     req, _ := http.NewRequest("POST", "https://example.com/greeting", body)
 //     hd := hawk.Details{
 //         Algorithm:   crypto.SHA256
@@ -30,13 +30,14 @@
 //         URI:         "/greeting",
 //         ContentType: "plain/text",
 //         Content:     []byte("Hello world!"),
-//         Method:      "POST"}
+//         Method:      "POST",
+//         Ext:         "some-app-ext-data"}
 //     hd.Timestamp = time.Now().Unix()
 //     hd.Nonce = hawk.NewNonce(6)
 //     h, _ hd.Create()
 //     // h.Validate()
 //     h.Finalize("secret")
-//     auth := h.GetAuthorization("Hawk ID")
+//     auth := h.GetAuthorization("your-hawk-id")
 //     req.Header.Add("Content-Type", "plain/text")
 //     req.Header.Add("Authorization", auth)
 //     resp, err := c.Do(req)

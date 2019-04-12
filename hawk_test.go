@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"crypto"
 	"fmt"
-	"io"
 	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
@@ -227,7 +226,7 @@ func TestClient(t *testing.T) {
 	})
 	t.Run("data", func(t *testing.T) {
 		data := "Hello world!"
-		body := io.Reader(strings.NewReader(data))
+		body := strings.NewReader(data)
 		h := NewClient("jdoe", []byte("Syp9393"), crypto.SHA256, 6)
 		req, err := h.NewRequest("POST", "http://localhost/hello", body, "text/plain", "")
 		if err != nil {
