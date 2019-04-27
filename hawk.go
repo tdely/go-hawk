@@ -24,7 +24,7 @@
 //     body := strings.NewReader("Hello world!")
 //     req, _ := http.NewRequest("POST", "https://example.com/greeting", body)
 //     hd := hawk.Details{
-//         Algorithm:   crypto.SHA256
+//         Algorithm:   crypto.SHA256,
 //         Host:        "example.com",
 //         Port:        "443",
 //         URI:         "/greeting",
@@ -34,9 +34,9 @@
 //         Ext:         "some-app-ext-data"}
 //     hd.Timestamp = time.Now().Unix()
 //     hd.Nonce = hawk.NewNonce(6)
-//     h, _ hd.Create()
+//     h, _ := hd.Create()
 //     // h.Validate()
-//     h.Finalize("secret")
+//     h.Finalize([]("secret"))
 //     auth := h.GetAuthorization("your-hawk-id")
 //     req.Header.Add("Content-Type", "plain/text")
 //     req.Header.Add("Authorization", auth)
@@ -79,7 +79,7 @@ type Hawk struct {
 	respContent     []byte
 	respExt         string
 	respHash        string
-	respMac         string
+	respMAC         string
 }
 
 // Create takes the data in Details and creates a Hawk instance.
