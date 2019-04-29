@@ -7,9 +7,7 @@
 //         "crypto"
 //         hawk "gitlab.com/tdely/go-hawk"
 //         "net/http"
-//         "io"
 //         "strings"
-//         "time"
 //     )
 //
 //     c := &http.Client{}
@@ -17,8 +15,18 @@
 //     body := strings.NewReader("Hello world!")
 //     req, err := hc.NewRequest("POST", "https://example.com/greeting", body, "text/plain", "some-app-ext-data")
 //     resp, err := c.Do(req)
+//     // Check validity of response
+//     valid := hc.ValidateResponse(*resp)
 //
 // But if you want to not do payload verification or want to make life harder:
+//
+//     import (
+//         "crypto"
+//         hawk "gitlab.com/tdely/go-hawk"
+//         "net/http"
+//         "strings"
+//         "time"
+//     )
 //
 //     c := &http.Client{}
 //     body := strings.NewReader("Hello world!")
@@ -41,6 +49,7 @@
 //     req.Header.Add("Content-Type", "plain/text")
 //     req.Header.Add("Authorization", auth)
 //     resp, err := c.Do(req)
+//     // valid := h.ValidateResponse([]byte("justtesting"), *resp)
 package hawk
 
 import (
@@ -53,6 +62,7 @@ import (
 	"math/rand"
 	"net/http"
 	"regexp"
+	"strings"
 	"time"
 	"unsafe"
 )
@@ -143,11 +153,15 @@ type Client struct {
 	key         []byte
 	hash        crypto.Hash
 	NonceLength int
+	hawk        Hawk
 }
 
 // Regexp pattern for capturing HTTP/HTTPS URLs
 // Subgroups: 1 scheme, 2 host, 4 port, 5 URI
 const urlPattern = "^(http|https)://([^:/]+)(:([0-9]+))?(/(.+)?)?$"
+
+// Regexp pattern for capturing Hawk header elements.
+const hawkPattern = `(\w+)="([^"]*)"`
 
 // Constants for nonce creation
 const (
@@ -195,6 +209,46 @@ func (h *Hawk) Validate() bool {
 		return false
 	}
 	h.reqHash = hashPayload(h.algorithm, h.reqContentType, h.reqContent)
+	return true
+}
+
+// ValidateResponse validates the response to a Hawk request for message
+// authenticity, and if hash is sent: payload verification.
+func (h *Hawk) ValidateResponse(k []byte, r http.Response) bool {
+	ct := r.Header.Get("Content-Type")
+	if ct != "" && strings.Index(ct, ";") != -1 {
+		h.respContentType = ct[:strings.Index(ct, ";")]
+	} else if ct != "" {
+		h.respContentType = ct
+	}
+	auth := r.Header.Get("Server-Authorization")
+	re := regexp.MustCompile(hawkPattern)
+	elements := re.FindAllSubmatch([]byte(auth), -1)
+	for _, e := range elements {
+		key := string(e[1])
+		val := string(e[2])
+		switch key {
+		case "ext":
+			h.respExt = val
+		case "hash":
+			h.respHash = val
+		case "mac":
+			h.respMAC = val
+		}
+	}
+	if r.Body != nil {
+		h.respContent, _ = ioutil.ReadAll(r.Body)
+		r.Body.Close()
+	}
+
+	calcHash := hashPayload(h.algorithm, h.respContentType, h.respContent)
+	if h.respHash != "" && h.respHash != calcHash {
+		return false
+	}
+	calcMAC := hashMAC(h.algorithm, k, h.timestamp, h.nonce, h.method, h.uri, h.host, h.port, h.respHash, h.respExt)
+	if h.respMAC != calcMAC {
+		return false
+	}
 	return true
 }
 
@@ -286,13 +340,19 @@ func (c *Client) NewRequest(method string, url string, body io.Reader, contentTy
 		Timestamp:   ts,
 		Nonce:       nonce,
 		Ext:         ext}
-	h, _ := hd.Create()
-	h.Validate()
-	h.Finalize(c.key)
-	auth := h.GetAuthorization(c.uid)
+	c.hawk, _ = hd.Create()
+	c.hawk.Validate()
+	c.hawk.Finalize(c.key)
+	auth := c.hawk.GetAuthorization(c.uid)
 	req.Header.Add("Content-Type", contentType)
 	req.Header.Add("Authorization", auth)
 	return req, nil
+}
+
+// ValidateResponse validates the response to a Hawk request for message
+// authenticity, and if hash is sent: payload verification.
+func (c *Client) ValidateResponse(r http.Response) bool {
+	return c.hawk.ValidateResponse(c.key, r)
 }
 
 // NewClient creates a new Hawk client.

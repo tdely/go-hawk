@@ -92,6 +92,85 @@ func TestHawkSpecifics(t *testing.T) {
 	})
 }
 
+func TestValidateResponse(t *testing.T) {
+	hd := Details{
+		Algorithm: crypto.SHA256,
+		Host:      "example.com",
+		Port:      "8000",
+		URI:       "/resource/1?b=1&a=2",
+		Method:    "GET",
+		Timestamp: 1353832234,
+		Nonce:     "j4h3g2",
+		Ext:       "some-app-ext-data"}
+	h, _ := hd.Create()
+	h.Finalize([]byte("werxhqb98rpaxn39848xrunpaw3489ruxnpa98w4rxn"))
+
+	t.Run("ok", func(t *testing.T) {
+		header := http.Header{}
+		header.Add("Server-Authorization", `Hawk mac="w0o3mOz86b7a1M6OGS2hfMlrYeVB0jz/O+nhC9oCUAI=", hash="f9cDF/TDm7TkYRLnGwRMfeDzT6LixQVLvrIKhh0vgmM=", ext="response-specific"`)
+		header.Add("Content-Type", "text/plain")
+		resp := http.Response{
+			Status:     "200 OK",
+			StatusCode: 200,
+			Proto:      "HTTP/1.1",
+			ProtoMajor: 1,
+			ProtoMinor: 1,
+			Header:     header,
+			Body:       ioutil.NopCloser(bytes.NewBuffer([]byte("some reply")))}
+		if got, want := h.ValidateResponse([]byte("werxhqb98rpaxn39848xrunpaw3489ruxnpa98w4rxn"), resp), true; got != want {
+			t.Errorf("ValidateResponse failed:\n  got:  %t\n  want: %t", got, want)
+		}
+	})
+	t.Run("ok-with-content-type-parameter", func(t *testing.T) {
+		header := http.Header{}
+		header.Add("Server-Authorization", `Hawk mac="w0o3mOz86b7a1M6OGS2hfMlrYeVB0jz/O+nhC9oCUAI=", hash="f9cDF/TDm7TkYRLnGwRMfeDzT6LixQVLvrIKhh0vgmM=", ext="response-specific"`)
+		header.Add("Content-Type", "text/plain; charset=utf-8")
+		resp := http.Response{
+			Status:     "200 OK",
+			StatusCode: 200,
+			Proto:      "HTTP/1.1",
+			ProtoMajor: 1,
+			ProtoMinor: 1,
+			Header:     header,
+			Body:       ioutil.NopCloser(bytes.NewBuffer([]byte("some reply")))}
+		if got, want := h.ValidateResponse([]byte("werxhqb98rpaxn39848xrunpaw3489ruxnpa98w4rxn"), resp), true; got != want {
+			t.Errorf("ValidateResponse failed:\n  got:  %t\n  want: %t", got, want)
+		}
+	})
+	t.Run("altered-payload", func(t *testing.T) {
+		header := http.Header{}
+		header.Add("Server-Authorization", `Hawk mac="w0o3mOz86b7a1M6OGS2hfMlrYeVB0jz/O+nhC9oCUAI=", hash="f9cDF/TDm7TkYRLnGwRMfeDzT6LixQVLvrIKhh0vgmM=", ext="response-specific"`)
+		header.Add("Content-Type", "text/plain")
+		resp := http.Response{
+			Status:     "200 OK",
+			StatusCode: 200,
+			Proto:      "HTTP/1.1",
+			ProtoMajor: 1,
+			ProtoMinor: 1,
+			Header:     header,
+			Body:       ioutil.NopCloser(bytes.NewBuffer([]byte("wrong")))}
+		if got, want := h.ValidateResponse([]byte("werxhqb98rpaxn39848xrunpaw3489ruxnpa98w4rxn"), resp), false; got != want {
+			t.Errorf("ValidateResponse failed:\n  got:  %t\n  want: %t", got, want)
+		}
+	})
+	t.Run("wrong-key", func(t *testing.T) {
+		header := http.Header{}
+		header.Add("Server-Authorization", `Hawk mac="w0o3mOz86b7a1M6OGS2hfMlrYeVB0jz/O+nhC9oCUAI=", hash="f9cDF/TDm7TkYRLnGwRMfeDzT6LixQVLvrIKhh0vgmM=", ext="response-specific"`)
+		header.Add("Content-Type", "text/plain")
+		resp := http.Response{
+			Status:     "200 OK",
+			StatusCode: 200,
+			Proto:      "HTTP/1.1",
+			ProtoMajor: 1,
+			ProtoMinor: 1,
+			Header:     header,
+			Body:       ioutil.NopCloser(bytes.NewBuffer([]byte("some reply")))}
+		if got, want := h.ValidateResponse([]byte("wrong"), resp), false; got != want {
+			t.Errorf("ValidateResponse failed:\n  got:  %t\n  want: %t", got, want)
+		}
+	})
+}
+
 func TestCreate(t *testing.T) {
 	t.Run("Create-missing-Details-alg", func(t *testing.T) {
 		hd := Details{

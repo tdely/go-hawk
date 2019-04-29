@@ -24,39 +24,49 @@ import (
     "crypto"
     hawk "gitlab.com/tdely/go-hawk"
     "net/http"
-    "io"
     "strings"
-    "time"
 )
 
 c := &http.Client{}
-hc := hawk.NewClient("Hawk ID", []byte("secret"), crypto.SHA256, 6)
+hc := hawk.NewClient("your-hawk-id", []byte("secret"), crypto.SHA256, 6)
 body := strings.NewReader("Hello world!")
-req, err := hc.NewRequest("POST", "https://example.com/greeting", body, "text/plain", "")
+req, err := hc.NewRequest("POST", "https://example.com/greeting", body, "text/plain", "some-app-ext-data")
 resp, err := c.Do(req)
+// Check validity of response
+valid := hc.ValidateResponse(*resp)
 ```
 
 But if you want to not do payload verification or want to make life harder:
 
 ```go
+import (
+    "crypto"
+    hawk "gitlab.com/tdely/go-hawk"
+    "net/http"
+    "strings"
+    "time"
+)
+
 c := &http.Client{}
 body := strings.NewReader("Hello world!")
 req, _ := http.NewRequest("POST", "https://example.com/greeting", body)
 hd := hawk.Details{
-    Algorithm:   crypto.SHA256
+    Algorithm:   crypto.SHA256,
     Host:        "example.com",
     Port:        "443",
     URI:         "/greeting",
     ContentType: "plain/text",
     Content:     []byte("Hello world!"),
-    Method:      "POST"}
+    Method:      "POST",
+    Ext:         "some-app-ext-data"}
 hd.Timestamp = time.Now().Unix()
 hd.Nonce = hawk.NewNonce(6)
-h, _ hd.Create()
+h, _ := hd.Create()
 // h.Validate()
-h.Finalize("secret")
-auth := h.GetAuthorization("Hawk ID")
+h.Finalize([]("secret"))
+auth := h.GetAuthorization("your-hawk-id")
 req.Header.Add("Content-Type", "plain/text")
 req.Header.Add("Authorization", auth)
 resp, err := c.Do(req)
+// valid := h.ValidateResponse([]byte("justtesting"), *resp)
 ```
